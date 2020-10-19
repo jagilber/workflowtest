@@ -45,11 +45,11 @@ jobs:
 
       - name: dotnet restore
         shell: cmd
-        run: dotnet.exe restore %project_name%\%project_name%.csproj -Verbosity Detailed -NonInteractive -DirectDownload
+        run: dotnet.exe restore %project_name%\%project_name%.csproj -v diag
 
       - name: dotnet build
         shell: cmd
-        run: dotnet.exe build %project_name%\%project_name%.csproj -Verbosity detailed -c Release
+        run: dotnet.exe build %project_name%\%project_name%.csproj -v diag -c Release
 
       - name: nuget build / pack
         shell: cmd
@@ -170,4 +170,3 @@ jobs:
           asset_path: ${{ steps.set_nuget_package.outputs.nuget_package }}
           asset_name: ${{ steps.set_nuget_package.outputs.nuget_package_name }}
           asset_content_type: application/zip
-
