@@ -1,0 +1,170 @@
+name: CI CollectSFData
+
+env:
+  artifacts_path: bin\x64\artifacts
+  release_path: bin\x64\release
+  release_config: configurationFiles\collectsfdata.options.json
+  project_name: CollectSFData
+  github_owner: ${{ github.event.repository.owner.name }}
+
+on:
+  pull_request_target:
+    types: [closed, opened]
+    paths-ignore:
+      - "docs/**"
+      - "configurationFiles/**"
+      - "KustoFunctions/**"
+      - "KustoQueries/**"
+      - "LogAnalyticsQueries/**"
+    branches:
+      - master
+      - dllmain
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v1
+
+      - name: environment
+        shell: cmd
+        run: set
+
+      - name: nuget download
+        shell: cmd
+        run: curl https://dist.nuget.org/win-x86-commandline/latest/nuget.exe --output nuget.exe
+
+      - name: nuget restore
+        shell: cmd
+        run: nuget.exe restore -Verbosity Detailed -NonInteractive -DirectDownload
+
+      - name: nuget build / pack
+        shell: cmd
+        run: |
+          set
+          nuget.exe pack %project_name%\%project_name%.csproj -Verbosity Detailed -outputdirectory %artifacts_path% -NonInteractive -Build -Properties Configuration=Release
+          dir
+
+      - name: build output
+        shell: cmd
+        run: |
+          set
+          dir
+          dir %release_path% /s
+
+      - name: copy artifacts
+        shell: cmd
+        run: |
+          set
+          dir
+          md %artifacts_path%
+          copy %release_path%\*.config %artifacts_path%
+          copy %release_path%\*.exe %artifacts_path%
+          copy %release_path%\*.dll %artifacts_path%
+          copy %release_config% %artifacts_path%
+
+      - name: artifacts output
+        shell: cmd
+        run: dir %artifacts_path% /s
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: Release
+          path: ${{ env.artifacts_path }}
+
+  release:
+    if: success() && github.event.pull_request.merged == true && github.event.action == 'closed' && (contains(github.event.pull_request.labels.*.name, 'Release') || contains(github.event.pull_request.labels.*.name, 'Pre-release'))
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v1
+
+      - name: environment
+        shell: cmd
+        run: set
+
+      - name: download artifact
+        uses: actions/download-artifact@v1
+        with:
+          name: Release
+          path: ${{ env.release_path }}
+
+      - name: release output
+        shell: cmd
+        run: dir %release_path% /s
+
+      - name: set nuget package
+        shell: powershell
+        id: set_nuget_package
+        run: |
+          $nugetPackage = (get-item "$($env:release_path)\*.nupkg").FullName
+          $nugetPackageName = (get-item "$($env:release_path)\*.nupkg").Name
+          echo "::set-output name=nuget_package::$nugetPackage"
+          echo "::set-output name=nuget_package_name::$nugetPackageName"
+
+      - name: nuget push
+        shell: cmd
+        run: |
+          echo #not working needs codesign
+          echo nuget.exe push ${{ steps.set_nuget_package.outputs.nuget_package }} %nuget_api_key% -Verbosity Detailed -Source https://api.nuget.org/v3/index.json -SkipDuplicate -NonInteractive
+          echo # working in fork, GPR blocked on upstream 
+          echo nuget.exe sources add -Name 'GPR' -Verbosity Detailed -Source https://nuget.pkg.github.com/%github_owner%/index.json -NonInteractive -UserName %GITHUB_ACTOR% -Password %GITHUB_TOKEN%
+          echo nuget.exe setapikey %nuget_api_key% -Source 'GPR' -Verbosity Detailed -NonInteractive
+          echo nuget.exe push %artifacts_path%\*.nupkg -Verbosity Detailed -Source 'GPR' -SkipDuplicate -NonInteractive -apikey %nuget_api_key%
+
+        env:
+          nuget_api_key: ${{ secrets.ACTIONS_NUGET_PUSH_API_KEY }}
+          nuget_token: ${{ secrets.ACTIONS_NUGET_PUSH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: prepare release asset
+        shell: powershell
+        id: prepare_release_asset
+        run: |
+          md "$($env:release_path)_upload"
+          copy "$($env:release_path)\*.config" "$($env:release_path)_upload"
+          copy "$($env:release_path)\*.exe" "$($env:release_path)_upload"
+          copy "$($env:release_path)\*.dll" "$($env:release_path)_upload"
+          copy "$($env:release_path)\*.json" "$($env:release_path)_upload"
+          compress-archive -path "$($env:release_path)_upload\*" -destinationPath "$($env:release_path)\$($env:project_name).zip" -force
+          $fileVersion = [io.fileinfo]::new("$($env:release_path)\$($env:project_name).exe").VersionInfo.FileVersion
+          echo "::log-command parameter1=$fileVersion::fileVersion"
+          echo "::set-output name=file_version::v$fileVersion"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.prepare_release_asset.outputs.file_version }}
+          release_name: ${{ env.project_name }}
+          draft: false
+          prerelease: ${{ contains(github.event.pull_request.labels.*.name, 'Pre-release') }}
+
+      - name: upload release asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: .\${{ env.release_path }}\${{ env.project_name }}.zip
+          asset_name: ${{ env.project_name }}.zip
+          asset_content_type: application/zip
+
+      - name: upload nuget release asset
+        id: upload-nuget-release-asset
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.set_nuget_package.outputs.nuget_package }}
+          asset_name: ${{ steps.set_nuget_package.outputs.nuget_package_name }}
+          asset_content_type: application/zip
+
