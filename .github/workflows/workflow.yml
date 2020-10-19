@@ -30,6 +30,19 @@ jobs:
         shell: cmd
         run: set
 
+      - name: test
+        shell: powershell
+        run: |
+          if((test-path nuget.exe)) { 
+            write-host "found nuget"
+          }
+          if((test-path nuget.exe)) { 
+            write-host "found dotnet"
+          }
+          iwr "https://raw.githubusercontent.com/jagilber/powershellScripts/master/resolve-envPath.ps1" -outFile "$pwd\resolve-envPath.ps1";
+          .\resolve-envPath.ps1 -item nuget.exe
+          .\resolve-envPath.ps1 -item dotnet.exe
+
       - name: nuget download
         shell: cmd
         run: curl https://dist.nuget.org/win-x86-commandline/latest/nuget.exe --output nuget.exe
