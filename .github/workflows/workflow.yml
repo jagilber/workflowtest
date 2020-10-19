@@ -170,4 +170,3 @@ jobs:
           asset_path: ${{ steps.set_nuget_package.outputs.nuget_package }}
           asset_name: ${{ steps.set_nuget_package.outputs.nuget_package_name }}
           asset_content_type: application/zip
-
